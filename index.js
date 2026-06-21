@@ -176,7 +176,19 @@ async function run() {
       const result=await proposalCollection.insertOne(proposalData)
       res.json(result)
     })
-
+    app.get("/api/proposal",async(req,res)=>{
+      const query={}
+      if(req.query.taskId){
+        query.taskId=req.query.taskId
+      }
+      if(req.query.freelancerEmail){
+        query.freelancerEmail=req.query.freelancerEmail
+      }
+      const proposal=await proposalCollection.findOne({
+        $and:[{taskId:query.taskId},{freelancerEmail:query.freelancerEmail}]
+      })
+      res.json(proposal)
+    })
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
