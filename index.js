@@ -24,58 +24,14 @@ async function run() {
     const db = await client.db("TaskForgeDB");
     const taskCollection = db.collection("tasks");
     const userCollection = db.collection("user");
-
+    const proposalCollection=db.collection("proposals");
     app.get("/user", async (req, res) => {
       const result = await userCollection.find().toArray();
       res.json(result);
     });
 
-    app.get("/api/allTasks", async (req, res) => {
-      const tasks = await taskCollection
-        .aggregate([
-          {
-            $lookup: {
-              from: "user",
-              let: {
-                clientIdObj: {
-                  $toObjectId: "$clientId",
-                },
-              },
-              pipeline: [
-                {
-                  $match: {
-                    $expr: {
-                      $eq: ["$_id", "$$clientIdObj"],
-                    },
-                  },
-                },
-              ],
-              as: "client",
-            },
-          },
-          {
-            $unwind: "$client",
-          },
-          {
-            $addFields: {
-              clientName: "$client.name",
-            },
-          },
-          {
-            $project: {
-              client: 0,
-            },
-          },
-          {
-            $match: {
-              status: "open",
-            },
-          },
-        ])
-        .toArray();
-      res.json(tasks);
-    });
-    // Tasks Related
+    0;
+    // Tasks Related Api
     app.post("/api/create/task", async (req, res) => {
       const data = req.body;
       const taskData = {
@@ -137,6 +93,91 @@ async function run() {
         .toArray();
       res.json(tasks);
     });
+
+    app.get("/api/taskDetails/:id", async (req, res) => {
+      const { id } = req.params;
+      const task =await taskCollection
+        .aggregate([
+          {
+            $match: { _id: new ObjectId(id) },
+          },
+          {
+            $lookup: {
+              from: "user",
+              let: {
+                clientIdObj: {
+                  $toObjectId: "$clientId",
+                },
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: ["$_id", "$$clientIdObj"],
+                    },
+                  },
+                },
+              ],
+              as: "client",
+            },
+          },
+          {
+            $unwind: "$client",
+          },
+          {
+            $lookup: {
+              from: "tasks",
+              let: {
+                clientId: "$clientId",
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: ["$clientId", "$$clientId"],
+                    },
+                  },
+                },
+                {
+                  $count: "total",
+                },
+              ],
+              as: "postedJobs",
+            },
+          },
+          {
+            $addFields: {
+              clientName: "$client.name",
+              clientImage: "$client.image",
+              clientCreatedAt: "$client.createdAt",
+              clientPostedJobs: {
+                $ifNull: [{ $arrayElemAt: ["$postedJobs.total", 0] }, 0],
+              },
+            },
+          },
+          {
+            $project: {
+              client: 0,
+              postedJobs: 0,
+            },
+          },
+        ]).toArray()
+        // console.log(task)
+      res.json(task[0]);
+    });
+
+    // Proposal Related Api
+
+    app.post("/api/post/proposal",async(req,res)=>{
+      const data=req.body;
+      const proposalData={
+        ...data,
+        submittedAt:new Date()
+      }
+      const result=await proposalCollection.insertOne(proposalData)
+      res.json(result)
+    })
+
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
