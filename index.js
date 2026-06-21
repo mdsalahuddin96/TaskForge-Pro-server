@@ -167,7 +167,6 @@ async function run() {
     });
 
     // Proposal Related Api
-
     app.post("/api/post/proposal",async(req,res)=>{
       const data=req.body;
       const proposalData={
