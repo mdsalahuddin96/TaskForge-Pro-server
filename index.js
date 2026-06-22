@@ -84,10 +84,10 @@ async function run() {
               },
             },
             {
-              $project:{
-                proposal:0
-              }
-            }
+              $project: {
+                proposal: 0,
+              },
+            },
           ])
           .toArray();
         res.json(result);
@@ -192,13 +192,13 @@ async function run() {
             $lookup: {
               from: "proposals",
               let: {
-                taskId:"$_id"
+                taskId: "$_id",
               },
               pipeline: [
                 {
                   $match: {
                     $expr: {
-                      $eq: [{$toObjectId:"$taskId"}, "$$taskId"],
+                      $eq: [{ $toObjectId: "$taskId" }, "$$taskId"],
                     },
                   },
                 },
@@ -240,17 +240,24 @@ async function run() {
     });
     app.get("/api/proposal", async (req, res) => {
       const query = {};
-      if (req.query.taskId) {
+      if (req.query.taskId && req.query.freelancerEmail) {
         query.taskId = req.query.taskId;
-      }
-      if (req.query.freelancerEmail) {
         query.freelancerEmail = req.query.freelancerEmail;
+        const proposal = await proposalCollection.findOne({
+          $and: [
+            { taskId: query.taskId },
+            { freelancerEmail: query.freelancerEmail },
+          ],
+        });
+        res.json(proposal);
       }
+      const proposal = await proposalCollection.find().toArray();
+      res.json(proposal);
+    });
+    app.get("/api/proposalById", async (req, res) => {
+      const proposalId = req.query.proposalId;
       const proposal = await proposalCollection.findOne({
-        $and: [
-          { taskId: query.taskId },
-          { freelancerEmail: query.freelancerEmail },
-        ],
+        _id: new ObjectId(proposalId),
       });
       res.json(proposal);
     });
