@@ -25,6 +25,7 @@ async function run() {
     const taskCollection = db.collection("tasks");
     const userCollection = db.collection("user");
     const proposalCollection = db.collection("proposals");
+    const paymentCollection = db.collection("payments");
     app.get("/user", async (req, res) => {
       const result = await userCollection.find().toArray();
       res.json(result);
@@ -84,10 +85,10 @@ async function run() {
               },
             },
             {
-              $project:{
-                proposal:0
-              }
-            }
+              $project: {
+                proposal: 0,
+              },
+            },
           ])
           .toArray();
         res.json(result);
@@ -192,13 +193,13 @@ async function run() {
             $lookup: {
               from: "proposals",
               let: {
-                taskId:"$_id"
+                taskId: "$_id",
               },
               pipeline: [
                 {
                   $match: {
                     $expr: {
-                      $eq: [{$toObjectId:"$taskId"}, "$$taskId"],
+                      $eq: [{ $toObjectId: "$taskId" }, "$$taskId"],
                     },
                   },
                 },
@@ -254,7 +255,7 @@ async function run() {
       });
       res.json(proposal);
     });
-    app.get("/api/myproposals", async (req, res) => {
+    app.get("/api/freelancer/proposals", async (req, res) => {
       const freelancerEmail = req.query.freelancerEmail;
       const proposals = await proposalCollection
         .find({
@@ -262,6 +263,54 @@ async function run() {
         })
         .toArray();
       res.json(proposals);
+    });
+    app.get("/api/client/proposals", async (req, res) => {
+      const proposals = await proposalCollection
+        .aggregate([
+          {
+            $lookup: {
+              from: "tasks",
+              let: {
+                taskId: "$_id",
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: [{ $toObjectId: "$taskId" }, "$$taskId"],
+                    },
+                  },
+                },
+              ],
+              as: "tasks",
+            },
+          },
+          {
+            $project: {
+              tasks: 0,
+            },
+          },
+        ])
+        .toArray();
+      res.json(proposals);
+    });
+    app.get("/api/proposalById", async (req, res) => {
+      const proposalId = req.query.proposalId;
+      const proposal = await proposalCollection.findOne({
+        _id: new ObjectId(proposalId),
+      });
+      res.json(proposal);
+    });
+
+    // Payment Related Api
+    app.post("/api/save/payment", async (req, res) => {
+      const data = req.body;
+      const paymentData = {
+        ...data,
+        payedAt: new Date(),
+      };
+      const result = await paymentCollection.insertOne(paymentData);
+      res.json(result);
     });
     await client.db("admin").command({ ping: 1 });
     console.log(
