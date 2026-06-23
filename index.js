@@ -46,6 +46,7 @@ async function run() {
     app.get("/api/tasks", async (req, res) => {
       const query = {};
       if (req.query.clientId) {
+        // for specific client task
         query.clientId = req.query.clientId;
         const result = await taskCollection
           .aggregate([
@@ -93,7 +94,7 @@ async function run() {
           .toArray();
         res.json(result);
       }
-      const tasks = await taskCollection
+      const tasks = await taskCollection //for get all task in the browse task page
         .aggregate([
           {
             $lookup: {
@@ -257,10 +258,37 @@ async function run() {
     });
     app.get("/api/proposalById", async (req, res) => {
       const proposalId = req.query.proposalId;
-      const proposal = await proposalCollection.findOne({
-        _id: new ObjectId(proposalId),
-      });
-      res.json(proposal);
+      const proposal = await proposalCollection
+        .aggregate([
+          {
+            $match: {
+              _id: new ObjectId(proposalId),
+            },
+          },
+          {
+            $lookup: {
+              from: "user",
+              localField: "freelancerEmail",
+              foreignField: "email",
+              as: "freelancer",
+            },
+          },
+          {
+            $unwind: "$freelancer",
+          },
+          {
+            $addFields: {
+              freelancerName: "$freelancer.name",
+            },
+          },
+          {
+            $project: {
+              freelancer: 0,
+            },
+          },
+        ])
+        .toArray();
+      res.json(proposal[0]);
     });
     app.get("/api/freelancer/proposals", async (req, res) => {
       const freelancerEmail = req.query.freelancerEmail;
@@ -301,13 +329,6 @@ async function run() {
         .toArray();
       res.json(proposals);
     });
-    app.get("/api/proposalById", async (req, res) => {
-      const proposalId = req.query.proposalId;
-      const proposal = await proposalCollection.findOne({
-        _id: new ObjectId(proposalId),
-      });
-      res.json(proposal);
-    });
 
     // Payment Related Api
     app.post("/api/save/payment", async (req, res) => {
@@ -317,6 +338,33 @@ async function run() {
         payedAt: new Date(),
       };
       const result = await paymentCollection.insertOne(paymentData);
+      
+      //update payed proposal, pending to accepted 
+      await proposalCollection.updateOne( 
+        {
+          _id: new ObjectId(data?.proposalId),
+        },
+        {$set:{
+          status:"accepted"
+        }},
+      );
+      // Rejected others proposal
+      await proposalCollection.updateMany({
+        taskId:data?.taskId,
+        _id:{$ne:new ObjectId(data?.proposalId)}
+      },{
+        $set:{
+          status:"rejected"
+        }
+      })
+      // update task status to in-progress
+      await taskCollection.updateOne({
+        _id:new ObjectId(data?.taskId)
+      },{
+        $set:{
+          status:"In-progress"
+        }
+      })
       res.json(result);
     });
     await client.db("admin").command({ ping: 1 });
