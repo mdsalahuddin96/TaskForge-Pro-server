@@ -57,15 +57,15 @@ async function run() {
         { _id: new ObjectId(taskId) },
         { $set: updatedFields },
       );
-      res.json(result)
+      res.json(result);
     });
-    app.delete("/api/delete/task/:id",async(req,res)=>{
+    app.delete("/api/delete/task/:id", async (req, res) => {
       const taskId = req.params.id;
-      const result = await taskCollection.deleteOne(
-        { _id: new ObjectId(taskId) },
-      );
-      res.json(result)
-    })
+      const result = await taskCollection.deleteOne({
+        _id: new ObjectId(taskId),
+      });
+      res.json(result);
+    });
     app.get("/api/tasks", async (req, res) => {
       const query = {};
       if (req.query.clientId) {
@@ -277,6 +277,14 @@ async function run() {
       );
       res.json(result);
     });
+    app.delete("/api/delete/proposal/:id", async (req, res) => {
+      const proposalId = req.params.id;
+      const result = await proposalCollection.deleteOne({
+        _id: new ObjectId(proposalId),
+      });
+      console.log("result", result);
+      res.json(result);
+    });
     app.get("/api/proposal", async (req, res) => {
       const query = {};
       if (req.query.taskId && req.query.freelancerEmail) {
@@ -376,7 +384,36 @@ async function run() {
         .toArray();
       res.json(proposals);
     });
-
+    app.get("/api/active/projects", async (req, res) => {
+      const freelancerEmail = req.query.freelancerEmail;
+      const result = await proposalCollection.aggregate([
+        {
+          $match: {
+            freelancerEmail: freelancerEmail,
+          },
+        },
+        {
+          $addFields: {
+            taskObjId: {
+              $toObjectId: "$taskId",
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: "tasks",
+            localField: "taskObjId",
+            foreignField: "_id",
+            as: "tasks",
+          },
+        },
+        {
+          $unwind: "$tasks",
+        },
+        
+      ]).toArray()
+      res.json(result)
+    });
     // Payment Related Api
     app.post("/api/save/payment", async (req, res) => {
       const data = req.body;
