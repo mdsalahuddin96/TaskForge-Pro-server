@@ -31,7 +31,14 @@ async function run() {
       res.json(result);
     });
 
-    0;
+    // User Related Api
+    app.get("/api/freelancerProfile",async(req,res)=>{
+      const freelancerEmail=req.query.freelancerEmail
+      const result=await userCollection.findOne({
+        email:freelancerEmail
+      })
+      res.json(result)
+    })
     // Tasks Related Api
     app.post("/api/create/task", async (req, res) => {
       const data = req.body;
@@ -226,7 +233,6 @@ async function run() {
           },
         ])
         .toArray();
-      // console.log(task)
       res.json(task[0]);
     });
 
@@ -240,6 +246,18 @@ async function run() {
       const result = await proposalCollection.insertOne(proposalData);
       res.json(result);
     });
+    app.patch("/api/update/proposal",async(req,res)=>{
+      const {status}=req.body
+      const proposalId=req.query.proposalId;
+      const result=await proposalCollection.updateOne({
+        _id:new ObjectId(proposalId)
+      },{
+         $set:{
+          status:status
+        }
+      })
+      res.json(result)
+    })
     app.get("/api/proposal", async (req, res) => {
       const query = {};
       if (req.query.taskId && req.query.freelancerEmail) {
@@ -325,6 +343,15 @@ async function run() {
               tasks: 0,
             },
           },
+          {
+            $match:{
+              status:{$ne:"rejected"}
+            }
+          },{
+            $sort:{
+              submittedAt:-1
+            }
+          }
         ])
         .toArray();
       res.json(proposals);
