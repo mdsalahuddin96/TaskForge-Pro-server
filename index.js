@@ -32,13 +32,13 @@ async function run() {
     });
 
     // User Related Api
-    app.get("/api/freelancerProfile",async(req,res)=>{
-      const freelancerEmail=req.query.freelancerEmail
-      const result=await userCollection.findOne({
-        email:freelancerEmail
-      })
-      res.json(result)
-    })
+    app.get("/api/freelancerProfile", async (req, res) => {
+      const freelancerEmail = req.query.freelancerEmail;
+      const result = await userCollection.findOne({
+        email: freelancerEmail,
+      });
+      res.json(result);
+    });
     // Tasks Related Api
     app.post("/api/create/task", async (req, res) => {
       const data = req.body;
@@ -50,6 +50,22 @@ async function run() {
       res.json(result);
     });
 
+    app.patch("/api/update/task/:id", async (req, res) => {
+      const taskId = req.params.id;
+      const updatedFields = req.body;
+      const result = await taskCollection.updateOne(
+        { _id: new ObjectId(taskId) },
+        { $set: updatedFields },
+      );
+      res.json(result)
+    });
+    app.delete("/api/delete/task/:id",async(req,res)=>{
+      const taskId = req.params.id;
+      const result = await taskCollection.deleteOne(
+        { _id: new ObjectId(taskId) },
+      );
+      res.json(result)
+    })
     app.get("/api/tasks", async (req, res) => {
       const query = {};
       if (req.query.clientId) {
@@ -246,18 +262,21 @@ async function run() {
       const result = await proposalCollection.insertOne(proposalData);
       res.json(result);
     });
-    app.patch("/api/update/proposal",async(req,res)=>{
-      const {status}=req.body
-      const proposalId=req.query.proposalId;
-      const result=await proposalCollection.updateOne({
-        _id:new ObjectId(proposalId)
-      },{
-         $set:{
-          status:status
-        }
-      })
-      res.json(result)
-    })
+    app.patch("/api/update/proposal", async (req, res) => {
+      const { status } = req.body;
+      const proposalId = req.query.proposalId;
+      const result = await proposalCollection.updateOne(
+        {
+          _id: new ObjectId(proposalId),
+        },
+        {
+          $set: {
+            status: status,
+          },
+        },
+      );
+      res.json(result);
+    });
     app.get("/api/proposal", async (req, res) => {
       const query = {};
       if (req.query.taskId && req.query.freelancerEmail) {
@@ -344,14 +363,15 @@ async function run() {
             },
           },
           {
-            $match:{
-              status:{$ne:"rejected"}
-            }
-          },{
-            $sort:{
-              submittedAt:-1
-            }
-          }
+            $match: {
+              status: { $ne: "rejected" },
+            },
+          },
+          {
+            $sort: {
+              submittedAt: -1,
+            },
+          },
         ])
         .toArray();
       res.json(proposals);
@@ -365,33 +385,41 @@ async function run() {
         payedAt: new Date(),
       };
       const result = await paymentCollection.insertOne(paymentData);
-      
-      //update payed proposal, pending to accepted 
-      await proposalCollection.updateOne( 
+
+      //update payed proposal, pending to accepted
+      await proposalCollection.updateOne(
         {
           _id: new ObjectId(data?.proposalId),
         },
-        {$set:{
-          status:"accepted"
-        }},
+        {
+          $set: {
+            status: "accepted",
+          },
+        },
       );
       // Rejected others proposal
-      await proposalCollection.updateMany({
-        taskId:data?.taskId,
-        _id:{$ne:new ObjectId(data?.proposalId)}
-      },{
-        $set:{
-          status:"rejected"
-        }
-      })
+      await proposalCollection.updateMany(
+        {
+          taskId: data?.taskId,
+          _id: { $ne: new ObjectId(data?.proposalId) },
+        },
+        {
+          $set: {
+            status: "rejected",
+          },
+        },
+      );
       // update task status to in-progress
-      await taskCollection.updateOne({
-        _id:new ObjectId(data?.taskId)
-      },{
-        $set:{
-          status:"In-progress"
-        }
-      })
+      await taskCollection.updateOne(
+        {
+          _id: new ObjectId(data?.taskId),
+        },
+        {
+          $set: {
+            status: "In-progress",
+          },
+        },
+      );
       res.json(result);
     });
     await client.db("admin").command({ ping: 1 });
