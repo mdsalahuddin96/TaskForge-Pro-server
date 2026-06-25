@@ -28,6 +28,62 @@ async function run() {
     const paymentCollection = db.collection("payments");
     const reviewCollection = db.collection("reviews");
 
+    app.get("/api/monthly-growth/:clientId", async (req, res) => {
+      const { clientId } = req.params;
+
+      const now = new Date();
+
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      const result = await taskCollection
+        .aggregate([
+          {
+            $match: {
+              clientId,
+              status: "completed",
+              createdAt: {
+                $gte: firstDay.toISOString(),
+                $lt: lastDay.toISOString(),
+              },
+            },
+          },
+
+          {
+            $group: {
+              _id: "$category",
+
+              completedTasks: {
+                $sum: 1,
+              },
+
+              totalBudget: {
+                $sum: "$budget",
+              },
+            },
+          },
+
+          {
+            $project: {
+              _id: 0,
+              category: "$_id",
+              completedTasks: 1,
+              totalBudget: 1,
+            },
+          },
+
+          {
+            $sort: {
+              totalBudget: -1,
+            },
+          },
+        ])
+        .toArray();
+
+      res.send(result);
+    });
+    // User Related Api
     app.get("/api/user/:id", async (req, res) => {
       const userId = req.params.id;
       const result = await userCollection.findOne({
@@ -35,13 +91,30 @@ async function run() {
       });
       res.json(result);
     });
-
-    // User Related Api
+    app.patch("/api/update/user/:id", async (req, res) => {
+      const userId = req.params.id;
+      const updatedUserData = req.body;
+      const result = await userCollection.updateOne(
+        {
+          _id: new ObjectId(userId),
+        },
+        {
+          $set: updatedUserData,
+        },
+      );
+      res.json(result);
+    });
     app.get("/api/freelancerProfile", async (req, res) => {
       const freelancerEmail = req.query.freelancerEmail;
       const result = await userCollection.findOne({
         email: freelancerEmail,
       });
+      res.json(result);
+    });
+    app.get("/api/all/freelancer", async (req, res) => {
+      const result = await userCollection.find({
+        role: "Freelancer",
+      }).toArray();
       res.json(result);
     });
     // Tasks Related Api
@@ -54,7 +127,6 @@ async function run() {
       const result = await taskCollection.insertOne(taskData);
       res.json(result);
     });
-
     app.patch("/api/update/task/:id", async (req, res) => {
       const taskId = req.params.id;
       const updatedFields = req.body;
@@ -166,7 +238,6 @@ async function run() {
         .toArray();
       res.json(tasks);
     });
-
     app.get("/api/taskDetails/:id", async (req, res) => {
       const { id } = req.params;
       const task = await taskCollection
