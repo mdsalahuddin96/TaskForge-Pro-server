@@ -28,8 +28,11 @@ async function run() {
     const paymentCollection = db.collection("payments");
     const reviewCollection = db.collection("reviews");
 
-    app.get("/user", async (req, res) => {
-      const result = await userCollection.find().toArray();
+    app.get("/api/user/:id", async (req, res) => {
+      const userId = req.params.id;
+      const result = await userCollection.findOne({
+        _id: new ObjectId(userId),
+      });
       res.json(result);
     });
 
@@ -486,8 +489,8 @@ async function run() {
             {
               $lookup: {
                 from: "tasks",
-                localField:"taskIdObj",
-                foreignField:"_id",
+                localField: "taskIdObj",
+                foreignField: "_id",
                 as: "taskInfo",
               },
             },
@@ -503,7 +506,7 @@ async function run() {
               },
             },
             {
-              $unwind: "$clientInfo"
+              $unwind: "$clientInfo",
             },
             {
               $project: {
