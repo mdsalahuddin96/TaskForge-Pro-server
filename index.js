@@ -26,6 +26,8 @@ async function run() {
     const userCollection = db.collection("user");
     const proposalCollection = db.collection("proposals");
     const paymentCollection = db.collection("payments");
+    const reviewCollection = db.collection("reviews");
+
     app.get("/user", async (req, res) => {
       const result = await userCollection.find().toArray();
       res.json(result);
@@ -386,34 +388,41 @@ async function run() {
     });
     app.get("/api/active/projects", async (req, res) => {
       const freelancerEmail = req.query.freelancerEmail;
-      const result = await proposalCollection.aggregate([
-        {
-          $match: {
-            freelancerEmail: freelancerEmail,
-          },
-        },
-        {
-          $addFields: {
-            taskObjId: {
-              $toObjectId: "$taskId",
+      const result = await proposalCollection
+        .aggregate([
+          {
+            $match: {
+              freelancerEmail: freelancerEmail,
             },
           },
-        },
-        {
-          $lookup: {
-            from: "tasks",
-            localField: "taskObjId",
-            foreignField: "_id",
-            as: "tasks",
+          {
+            $addFields: {
+              taskObjId: {
+                $toObjectId: "$taskId",
+              },
+            },
           },
-        },
-        {
-          $unwind: "$tasks",
-        },
-        
-      ]).toArray()
-      res.json(result)
+          {
+            $lookup: {
+              from: "tasks",
+              localField: "taskObjId",
+              foreignField: "_id",
+              as: "tasks",
+            },
+          },
+          {
+            $unwind: "$tasks",
+          },
+          {
+            $match: {
+              "tasks.status": { $ne: "open" },
+            },
+          },
+        ])
+        .toArray();
+      res.json(result);
     });
+
     // Payment Related Api
     app.post("/api/save/payment", async (req, res) => {
       const data = req.body;
@@ -457,6 +466,135 @@ async function run() {
           },
         },
       );
+      res.json(result);
+    });
+    app.get("/api/freelancer/earnings/:email", async (req, res) => {
+      try {
+        const freelancerEmail = req.params.email;
+        // Aggregation Pipeline to join payment, tasks, and users collections
+        const earningsBreakdown = await paymentCollection
+          .aggregate([
+            {
+              $match: {
+                freelancerEmail: freelancerEmail,
+                payment_status: "paid",
+              },
+            },
+            {
+              $addFields: { taskIdObj: { $toObjectId: "$taskId" } },
+            },
+            {
+              $lookup: {
+                from: "tasks",
+                localField:"taskIdObj",
+                foreignField:"_id",
+                as: "taskInfo",
+              },
+            },
+            {
+              $unwind: "$taskInfo",
+            },
+            {
+              $lookup: {
+                from: "user",
+                localField: "clientEmail",
+                foreignField: "email",
+                as: "clientInfo",
+              },
+            },
+            {
+              $unwind: "$clientInfo"
+            },
+            {
+              $project: {
+                _id: 1,
+                amount: 1,
+                transaction_id: 1,
+                payedAt: 1,
+                taskTitle: { $ifNull: ["$taskInfo.title", "Deleted Project"] },
+                clientName: { $ifNull: ["$clientInfo.name", "Unknown Client"] },
+              },
+            },
+            {
+              $sort: { payedAt: -1 },
+            },
+          ])
+          .toArray();
+
+        // মোট উপার্জিত টাকার পরিমাণ হিসাব করা (Total Earnings Card এর জন্য)
+        const totalStats = await paymentCollection
+          .aggregate([
+            {
+              $match: {
+                freelancerEmail: freelancerEmail,
+                payment_status: "paid",
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: { $toDouble: "$amount" } },
+              },
+            },
+          ])
+          .toArray();
+
+        const totalMade = totalStats.length > 0 ? totalStats[0].total : 0;
+
+        res.json({
+          success: true,
+          totalEarnings: totalMade,
+          data: earningsBreakdown,
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+      }
+    });
+    // Review Related Api
+    app.post("/api/save/review", async (req, res) => {
+      try {
+        const data = req.body;
+        const reviewData = {
+          ...data,
+          reviewedAt: new Date(),
+        };
+        const result = await reviewCollection.insertOne(reviewData);
+        const freelancerEmail = data.reviewee_email;
+        const freelancer = await userCollection.findOne({
+          email: freelancerEmail,
+        });
+
+        if (freelancer) {
+          const currentTotalReviews = freelancer?.totalReviews || 0;
+          const currentAverageRating = freelancer?.averageRating || 0;
+
+          const newTotalReviews = currentTotalReviews + 1;
+
+          const calculatedAverage =
+            (currentAverageRating * currentTotalReviews + Number(data.rating)) /
+            newTotalReviews;
+          const newAverageRating = parseFloat(calculatedAverage.toFixed(1));
+          await userCollection.updateOne(
+            { email: freelancerEmail },
+            {
+              $set: {
+                averageRating: newAverageRating,
+                totalReviews: newTotalReviews,
+              },
+            },
+          );
+        }
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Internal Server Error",
+          error: error.message,
+        });
+      }
+    });
+    app.get("/reviews", async (req, res) => {
+      const result = await reviewCollection.find().toArray();
       res.json(result);
     });
     await client.db("admin").command({ ping: 1 });
