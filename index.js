@@ -28,15 +28,69 @@ async function run() {
     const paymentCollection = db.collection("payments");
     const reviewCollection = db.collection("reviews");
 
+    // stats api
+    app.get("/api/client-dashboard-stats", async (req, res) => {
+      const clientEmail = req.query.clientEmail;
+      const [taskStats, paymentStats] = await Promise.all([
+        taskCollection
+          .aggregate([
+            {
+              $match: { clientEmail },
+            },
+            {
+              $group: {
+                _id: null,
+                totalTasks: { $sum: 1 },
+
+                openTasks: {
+                  $sum: {
+                    $cond: [{ $eq: ["$status", "open"] }, 1, 0],
+                  },
+                },
+
+                inProgressTasks: {
+                  $sum: {
+                    $cond: [{ $eq: ["$status", "in-progress"] }, 1, 0],
+                  },
+                },
+              },
+            },
+          ])
+          .toArray(),
+
+        paymentCollection
+          .aggregate([
+            {
+              $match: {
+                clientEmail,
+                payment_status: "paid",
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalSpent: {
+                  $sum: {
+                    $toDouble: "$amount",
+                  },
+                },
+              },
+            },
+          ])
+          .toArray(),
+      ]);
+      res.send({
+        totalTasks: taskStats[0]?.totalTasks || 0,
+        openTasks: taskStats[0]?.openTasks || 0,
+        inProgressTasks: taskStats[0]?.inProgressTasks || 0,
+        totalSpent: paymentStats[0]?.totalSpent || 0,
+      });
+    });
     app.get("/api/monthly-growth/:clientId", async (req, res) => {
       const { clientId } = req.params;
-
       const now = new Date();
-
       const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-
       const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-
       const result = await taskCollection
         .aggregate([
           {
@@ -44,10 +98,33 @@ async function run() {
               clientId,
               status: "completed",
               createdAt: {
-                $gte: firstDay.toISOString(),
-                $lt: lastDay.toISOString(),
+                $gte: firstDay,
+                $lt: lastDay,
               },
             },
+          },
+
+          {
+            $lookup: {
+              from: "payments",
+              let: {
+                taskId: { $toString: "$_id" },
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: ["$taskId", "$$taskId"],
+                    },
+                  },
+                },
+              ],
+              as: "payment",
+            },
+          },
+
+          {
+            $unwind: "$payment",
           },
 
           {
@@ -59,7 +136,9 @@ async function run() {
               },
 
               totalBudget: {
-                $sum: "$budget",
+                $sum: {
+                  $toDouble: "$payment.amount",
+                },
               },
             },
           },
@@ -80,8 +159,210 @@ async function run() {
           },
         ])
         .toArray();
+      res.json(result);
+    });
+    app.get("/api/freelancer-overview/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
 
-      res.send(result);
+        const now = new Date();
+
+        const firstDayOfThreeMonthsAgo = new Date(
+          now.getFullYear(),
+          now.getMonth() - 2,
+          1,
+        );
+
+        const [proposalStats, paymentStats, runningProjects, monthlyEarnings] =
+          await Promise.all([
+           
+            // Proposal Statistics
+            proposalCollection
+              .aggregate([
+                {
+                  $match: {
+                    freelancerEmail: email,
+                  },
+                },
+                {
+                  $group: {
+                    _id: null,
+
+                    totalProposals: {
+                      $sum: 1,
+                    },
+
+                    pendingProposals: {
+                      $sum: {
+                        $cond: [{ $eq: ["$status", "pending"] }, 1, 0],
+                      },
+                    },
+
+                    acceptedProposals: {
+                      $sum: {
+                        $cond: [{ $eq: ["$status", "accepted"] }, 1, 0],
+                      },
+                    },
+                  },
+                },
+              ])
+              .toArray(),
+
+            // Total Earnings
+            paymentCollection
+              .aggregate([
+                {
+                  $match: {
+                    freelancerEmail: email,
+                    payment_status: "paid",
+                  },
+                },
+                {
+                  $group: {
+                    _id: null,
+
+                    totalEarnings: {
+                      $sum: {
+                        $toDouble: "$amount",
+                      },
+                    },
+                  },
+                },
+              ])
+              .toArray(),
+
+            // Running Projects
+            proposalCollection
+              .aggregate([
+                {
+                  $match: {
+                    freelancerEmail: email,
+                    status: "accepted",
+                  },
+                },
+
+                {
+                  $lookup: {
+                    from: "tasks",
+
+                    let: {
+                      taskId: {
+                        $toObjectId: "$taskId",
+                      },
+                    },
+
+                    pipeline: [
+                      {
+                        $match: {
+                          $expr: {
+                            $eq: ["$_id", "$$taskId"],
+                          },
+                        },
+                      },
+
+                      {
+                        $match: {
+                          status: "in-progress",
+                        },
+                      },
+
+                      {
+                        $project: {
+                          title: 1,
+                          category: 1,
+                          deadline: 1,
+                          budget: 1,
+                          clientEmail: 1,
+                        },
+                      },
+                    ],
+
+                    as: "task",
+                  },
+                },
+
+                {
+                  $unwind: "$task",
+                },
+
+                {
+                  $replaceRoot: {
+                    newRoot: "$task",
+                  },
+                },
+              ])
+              .toArray(),
+
+            // Last 3 Months Earnings
+
+            paymentCollection
+              .aggregate([
+                {
+                  $match: {
+                    freelancerEmail: email,
+                    payment_status: "paid",
+                    payedAt: {
+                      $gte: firstDayOfThreeMonthsAgo,
+                    },
+                  },
+                },
+
+                {
+                  $group: {
+                    _id: {
+                      year: {
+                        $year: "$payedAt",
+                      },
+                      month: {
+                        $month: "$payedAt",
+                      },
+                    },
+
+                    earning: {
+                      $sum: {
+                        $toDouble: "$amount",
+                      },
+                    },
+                  },
+                },
+
+                {
+                  $sort: {
+                    "_id.year": 1,
+                    "_id.month": 1,
+                  },
+                },
+
+                {
+                  $project: {
+                    _id: 0,
+                    year: "$_id.year",
+                    month: "$_id.month",
+                    earning: 1,
+                  },
+                },
+              ])
+              .toArray(),
+          ]);
+
+        const stats = {
+          totalProposals: proposalStats[0]?.totalProposals || 0,
+          pendingProposals: proposalStats[0]?.pendingProposals || 0,
+          acceptedProposals: proposalStats[0]?.acceptedProposals || 0,
+          totalEarnings: paymentStats[0]?.totalEarnings || 0,
+        };
+
+        res.send({
+          stats,
+          runningProjects,
+          monthlyEarnings,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({
+          message: "Internal Server Error",
+        });
+      }
     });
     // User Related Api
     app.get("/api/user/:id", async (req, res) => {
@@ -112,9 +393,11 @@ async function run() {
       res.json(result);
     });
     app.get("/api/all/freelancer", async (req, res) => {
-      const result = await userCollection.find({
-        role: "Freelancer",
-      }).toArray();
+      const result = await userCollection
+        .find({
+          role: "Freelancer",
+        })
+        .toArray();
       res.json(result);
     });
     // Tasks Related Api
