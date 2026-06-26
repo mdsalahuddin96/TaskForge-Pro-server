@@ -175,7 +175,6 @@ async function run() {
 
         const [proposalStats, paymentStats, runningProjects, monthlyEarnings] =
           await Promise.all([
-           
             // Proposal Statistics
             proposalCollection
               .aggregate([
@@ -364,6 +363,174 @@ async function run() {
         });
       }
     });
+    app.get("/api/admin/overview", async (req, res) => {
+      try {
+        const today = new Date();
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(today.getDate() - 6);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+        const [
+          totalUsers,
+          totalTasks,
+          activeTasks,
+          revenue,
+          categoryData,
+          paymentTrend,
+          userTrend,
+        ] = await Promise.all([
+          // Total Users
+          userCollection.countDocuments(),
+
+          // Total Tasks
+          taskCollection.countDocuments(),
+
+          // Active Tasks
+          taskCollection.countDocuments({
+            status: { $ne: "completed" },
+          }),
+
+          // Total Revenue
+          paymentCollection
+            .aggregate([
+              {
+                $match: {
+                  payment_status: "paid",
+                },
+              },
+              {
+                $group: {
+                  _id: null,
+                  totalRevenue: {
+                    $sum: {
+                      $toDouble: "$amount",
+                    },
+                  },
+                },
+              },
+            ])
+            .toArray(),
+
+          // Category Distribution
+          taskCollection
+            .aggregate([
+              {
+                $group: {
+                  _id: "$category",
+                  value: {
+                    $sum: 1,
+                  },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  name: "$_id",
+                  value: 1,
+                },
+              },
+            ])
+            .toArray(),
+
+          // Last 7 Days Revenue
+          paymentCollection
+            .aggregate([
+              {
+                $match: {
+                  payment_status: "paid",
+                  payedAt: {
+                    $gte: sevenDaysAgo,
+                  },
+                },
+              },
+              {
+                $group: {
+                  _id: {
+                    $dateToString: {
+                      format: "%Y-%m-%d",
+                      date: "$payedAt",
+                    },
+                  },
+
+                  revenue: {
+                    $sum: {
+                      $toDouble: "$amount",
+                    },
+                  },
+                },
+              },
+            ])
+            .toArray(),
+
+          // Last 7 Days Registration
+          userCollection
+            .aggregate([
+              {
+                $match: {
+                  createdAt: {
+                    $gte: sevenDaysAgo,
+                  },
+                },
+              },
+              {
+                $group: {
+                  _id: {
+                    $dateToString: {
+                      format: "%Y-%m-%d",
+                      date: "$createdAt",
+                    },
+                  },
+
+                  users: {
+                    $sum: 1,
+                  },
+                },
+              },
+            ])
+            .toArray(),
+        ]);
+
+        // ===========================
+        // Merge Trend Data
+        // ===========================
+
+        const trendData = [];
+
+        for (let i = 6; i >= 0; i--) {
+          const date = new Date();
+
+          date.setDate(today.getDate() - i);
+
+          const key = date.toISOString().split("T")[0];
+
+          trendData.push({
+            date: key,
+            revenue:
+              paymentTrend.find((item) => item._id === key)?.revenue || 0,
+
+            users: userTrend.find((item) => item._id === key)?.users || 0,
+          });
+        }
+
+        res.json({
+          stats: {
+            totalUsers,
+            totalTasks,
+            activeTasks,
+            totalRevenue: revenue[0]?.totalRevenue || 0,
+          },
+
+          categoryData,
+
+          trendData,
+        });
+      } catch (error) {
+        console.log(error);
+
+        res.status(500).send({
+          message: "Internal Server Error",
+        });
+      }
+    });
     // User Related Api
     app.get("/api/user/:id", async (req, res) => {
       const userId = req.params.id;
@@ -383,6 +550,10 @@ async function run() {
           $set: updatedUserData,
         },
       );
+      res.json(result);
+    });
+    app.get("/api/all/users", async (req, res) => {
+      const result = await userCollection.find().toArray();
       res.json(result);
     });
     app.get("/api/freelancerProfile", async (req, res) => {
@@ -475,9 +646,9 @@ async function run() {
             },
           ])
           .toArray();
-        res.json(result);
+        return res.json(result);
       }
-      const tasks = await taskCollection //for get all task in the browse task page
+      const allTasks = await taskCollection //for get all task in the admin task management page
         .aggregate([
           {
             $lookup: {
@@ -512,14 +683,114 @@ async function run() {
               client: 0,
             },
           },
-          {
-            $match: {
-              status: "open",
-            },
-          },
         ])
         .toArray();
-      res.json(tasks);
+      res.json({ allTasks });
+    });
+    app.get("/api/browse-tasks", async (req, res) => {
+      try {
+        const { search, category, budget } = req.query;
+
+        const match = {
+          status: "open",
+        };
+
+        // Search by title
+        if (search) {
+          match.title = {
+            $regex: search,
+            $options: "i",
+          };
+        }
+
+        // Category Filter
+        if (category && category !== "All Category") {
+          match.category = {
+            $regex: category,
+            $options: "i",
+          };
+        }
+
+        // Budget Filter
+        if (budget) {
+          switch (budget) {
+            case "low":
+              match.budget = { $lt: 50 };
+              break;
+
+            case "mid":
+              match.budget = {
+                $gte: 50,
+                $lte: 200,
+              };
+              break;
+
+            case "high":
+              match.budget = {
+                $gt: 200,
+              };
+              break;
+          }
+        }
+
+        const tasks = await taskCollection
+          .aggregate([
+            {
+              $match: match,
+            },
+
+            {
+              $lookup: {
+                from: "user",
+                let: {
+                  clientIdObj: {
+                    $toObjectId: "$clientId",
+                  },
+                },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $eq: ["$_id", "$$clientIdObj"],
+                      },
+                    },
+                  },
+                ],
+                as: "client",
+              },
+            },
+
+            {
+              $unwind: "$client",
+            },
+
+            {
+              $addFields: {
+                clientName: "$client.name",
+              },
+            },
+
+            {
+              $project: {
+                client: 0,
+              },
+            },
+
+            {
+              $sort: {
+                createdAt: -1,
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(tasks);
+      } catch (err) {
+        console.log(err);
+        res.status(500).send({
+          message: "Internal Server Error",
+        });
+      }
     });
     app.get("/api/taskDetails/:id", async (req, res) => {
       const { id } = req.params;
@@ -906,6 +1177,10 @@ async function run() {
       } catch (error) {
         res.status(500).json({ success: false, message: error.message });
       }
+    });
+    app.get("/api/payments", async (req, res) => {
+      const result = await paymentCollection.find().toArray();
+      res.json(result);
     });
     // Review Related Api
     app.post("/api/save/review", async (req, res) => {
