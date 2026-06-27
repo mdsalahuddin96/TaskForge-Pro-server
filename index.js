@@ -683,6 +683,9 @@ async function run() {
               client: 0,
             },
           },
+          {
+            $sort:{createdAt:-1}
+          }
         ])
         .toArray();
       res.json({ allTasks });
@@ -792,6 +795,16 @@ async function run() {
         });
       }
     });
+    app.get("/api/featured/tasks",async(req,res)=>{
+      const result=await taskCollection.aggregate([
+        {$match:{
+          status:"open"
+        }},{
+          $sort:{createdAt:-1}
+        }
+      ]).limit(6).toArray()
+      res.json(result)
+    })
     app.get("/api/taskDetails/:id", async (req, res) => {
       const { id } = req.params;
       const task = await taskCollection
