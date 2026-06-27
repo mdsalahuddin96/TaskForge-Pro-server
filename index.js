@@ -44,7 +44,7 @@ async function run() {
       const userId = session?.userId;
       const user = await userCollection.findOne({ _id: userId });
       req.user = user;
-      console.log("user",user)
+      // console.log("user", user);
       next();
     };
     const verifyClient = async (req, res, next) => {
@@ -57,6 +57,13 @@ async function run() {
     const verifyFreelancer = async (req, res, next) => {
       const user = req.user;
       if (user.role !== "Freelancer") {
+        return res.status(403).send({ message: "Forbidden user" });
+      }
+      next();
+    };
+    const verifyAdmin = async (req, res, next) => {
+      const user = req.user;
+      if (user.role !== "Admin") {
         return res.status(403).send({ message: "Forbidden user" });
       }
       next();
@@ -650,22 +657,32 @@ async function run() {
         res.json(result);
       },
     );
-    app.patch("/api/update/task/:id",verifyToken,verifyClient, async (req, res) => {
-      const taskId = req.params.id;
-      const updatedFields = req.body;
-      const result = await taskCollection.updateOne(
-        { _id: new ObjectId(taskId) },
-        { $set: updatedFields },
-      );
-      res.json(result);
-    });
-    app.delete("/api/delete/task/:id",verifyToken,verifyClient, async (req, res) => {
-      const taskId = req.params.id;
-      const result = await taskCollection.deleteOne({
-        _id: new ObjectId(taskId),
-      });
-      res.json(result);
-    });
+    app.patch(
+      "/api/update/task/:id",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        const taskId = req.params.id;
+        const updatedFields = req.body;
+        const result = await taskCollection.updateOne(
+          { _id: new ObjectId(taskId) },
+          { $set: updatedFields },
+        );
+        res.json(result);
+      },
+    );
+    app.delete(
+      "/api/delete/task/:id",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        const taskId = req.params.id;
+        const result = await taskCollection.deleteOne({
+          _id: new ObjectId(taskId),
+        });
+        res.json(result);
+      },
+    );
     app.get("/api/tasks", async (req, res) => {
       const query = {};
       if (req.query.clientId) {
@@ -971,16 +988,21 @@ async function run() {
     });
 
     // Proposal Related Api
-    app.post("/api/post/proposal",verifyToken,verifyFreelancer, async (req, res) => {
-      const data = req.body;
-      const proposalData = {
-        ...data,
-        submittedAt: new Date(),
-      };
-      const result = await proposalCollection.insertOne(proposalData);
-      res.json(result);
-    });
-    app.patch("/api/update/proposal",verifyToken, async (req, res) => {
+    app.post(
+      "/api/post/proposal",
+      verifyToken,
+      verifyFreelancer,
+      async (req, res) => {
+        const data = req.body;
+        const proposalData = {
+          ...data,
+          submittedAt: new Date(),
+        };
+        const result = await proposalCollection.insertOne(proposalData);
+        res.json(result);
+      },
+    );
+    app.patch("/api/update/proposal", verifyToken, async (req, res) => {
       const { status } = req.body;
       const proposalId = req.query.proposalId;
       const result = await proposalCollection.updateOne(
@@ -995,15 +1017,20 @@ async function run() {
       );
       res.json(result);
     });
-    app.delete("/api/delete/proposal/:id", verifyToken,verifyFreelancer, async (req, res) => {
-      const proposalId = req.params.id;
-      const result = await proposalCollection.deleteOne({
-        _id: new ObjectId(proposalId),
-      });
-      console.log("result", result);
-      res.json(result);
-    });
-    app.get("/api/proposal",verifyToken,verifyFreelancer, async (req, res) => {
+    app.delete(
+      "/api/delete/proposal/:id",
+      verifyToken,
+      verifyFreelancer,
+      async (req, res) => {
+        const proposalId = req.params.id;
+        const result = await proposalCollection.deleteOne({
+          _id: new ObjectId(proposalId),
+        });
+        console.log("result", result);
+        res.json(result);
+      },
+    );
+    app.get("/api/proposal", async (req, res) => {
       const query = {};
       if (req.query.taskId && req.query.freelancerEmail) {
         query.taskId = req.query.taskId;
@@ -1016,267 +1043,334 @@ async function run() {
         });
         return res.json(proposal);
       }
-      const proposal = await proposalCollection.find().toArray();
-      res.json(proposal);
-    });
-    app.get("/api/proposalById", async (req, res) => {
-      const proposalId = req.query.proposalId;
-      const proposal = await proposalCollection
-        .aggregate([
-          {
-            $match: {
-              _id: new ObjectId(proposalId),
-            },
-          },
-          {
-            $lookup: {
-              from: "user",
-              localField: "freelancerEmail",
-              foreignField: "email",
-              as: "freelancer",
-            },
-          },
-          {
-            $unwind: "$freelancer",
-          },
-          {
-            $addFields: {
-              freelancerName: "$freelancer.name",
-            },
-          },
-          {
-            $project: {
-              freelancer: 0,
-            },
-          },
-        ])
-        .toArray();
-      res.json(proposal[0]);
-    });
-    app.get("/api/freelancer/proposals",verifyToken,verifyFreelancer, async (req, res) => {
-      const freelancerEmail = req.query.freelancerEmail;
-      const proposals = await proposalCollection
-        .find({
-          freelancerEmail: freelancerEmail,
-        })
-        .toArray();
-      res.json(proposals);
+      res.json({});
     });
     app.get(
-      "/api/client/proposals",
+      "/api/proposalById",
       verifyToken,
       verifyClient,
       async (req, res) => {
-        const proposals = await proposalCollection
-          .aggregate([
-            {
-              $lookup: {
-                from: "tasks",
-                let: {
-                  taskId: "$_id",
-                },
-                pipeline: [
-                  {
-                    $match: {
-                      $expr: {
-                        $eq: [{ $toObjectId: "$taskId" }, "$$taskId"],
-                      },
-                    },
-                  },
-                ],
-                as: "tasks",
-              },
-            },
-            {
-              $project: {
-                tasks: 0,
-              },
-            },
-            {
-              $match: {
-                status: { $ne: "rejected" },
-              },
-            },
-            {
-              $sort: {
-                submittedAt: -1,
-              },
-            },
-          ])
-          .toArray();
-        res.json(proposals);
-      },
-    );
-    app.get("/api/active/projects",verifyToken,verifyFreelancer, async (req, res) => {
-      const freelancerEmail = req.query.freelancerEmail;
-      const result = await proposalCollection
-        .aggregate([
-          {
-            $match: {
-              freelancerEmail: freelancerEmail,
-            },
-          },
-          {
-            $addFields: {
-              taskObjId: {
-                $toObjectId: "$taskId",
-              },
-            },
-          },
-          {
-            $lookup: {
-              from: "tasks",
-              localField: "taskObjId",
-              foreignField: "_id",
-              as: "tasks",
-            },
-          },
-          {
-            $unwind: "$tasks",
-          },
-          {
-            $match: {
-              "tasks.status": { $ne: "open" },
-            },
-          },
-        ])
-        .toArray();
-      res.json(result);
-    });
-
-    // Payment Related Api
-    app.post("/api/save/payment", async (req, res) => {
-      const data = req.body;
-      const paymentData = {
-        ...data,
-        payedAt: new Date(),
-      };
-      const result = await paymentCollection.insertOne(paymentData);
-
-      //update payed proposal, pending to accepted
-      await proposalCollection.updateOne(
-        {
-          _id: new ObjectId(data?.proposalId),
-        },
-        {
-          $set: {
-            status: "accepted",
-          },
-        },
-      );
-      // Rejected others proposal
-      await proposalCollection.updateMany(
-        {
-          taskId: data?.taskId,
-          _id: { $ne: new ObjectId(data?.proposalId) },
-        },
-        {
-          $set: {
-            status: "rejected",
-          },
-        },
-      );
-      // update task status to in-progress
-      await taskCollection.updateOne(
-        {
-          _id: new ObjectId(data?.taskId),
-        },
-        {
-          $set: {
-            status: "In-progress",
-          },
-        },
-      );
-      res.json(result);
-    });
-    app.get("/api/freelancer/earnings/:email", verifyToken,verifyFreelancer, async (req, res) => {
-      try {
-        const freelancerEmail = req.params.email;
-        // Aggregation Pipeline to join payment, tasks, and users collections
-        const earningsBreakdown = await paymentCollection
+        const proposalId = req.query.proposalId;
+        const proposal = await proposalCollection
           .aggregate([
             {
               $match: {
-                freelancerEmail: freelancerEmail,
-                payment_status: "paid",
+                _id: new ObjectId(proposalId),
               },
-            },
-            {
-              $addFields: { taskIdObj: { $toObjectId: "$taskId" } },
-            },
-            {
-              $lookup: {
-                from: "tasks",
-                localField: "taskIdObj",
-                foreignField: "_id",
-                as: "taskInfo",
-              },
-            },
-            {
-              $unwind: "$taskInfo",
             },
             {
               $lookup: {
                 from: "user",
-                localField: "clientEmail",
+                localField: "freelancerEmail",
                 foreignField: "email",
-                as: "clientInfo",
+                as: "freelancer",
               },
             },
             {
-              $unwind: "$clientInfo",
+              $unwind: "$freelancer",
+            },
+            {
+              $addFields: {
+                freelancerName: "$freelancer.name",
+              },
             },
             {
               $project: {
-                _id: 1,
-                amount: 1,
-                transaction_id: 1,
-                payedAt: 1,
-                taskTitle: { $ifNull: ["$taskInfo.title", "Deleted Project"] },
-                clientName: { $ifNull: ["$clientInfo.name", "Unknown Client"] },
+                freelancer: 0,
               },
-            },
-            {
-              $sort: { payedAt: -1 },
             },
           ])
           .toArray();
+        res.json(proposal[0]);
+      },
+    );
+    app.get(
+      "/api/freelancer/proposals",
+      verifyToken,
+      verifyFreelancer,
+      async (req, res) => {
+        const freelancerEmail = req.query.freelancerEmail;
+        const proposals = await proposalCollection
+          .find({
+            freelancerEmail: freelancerEmail,
+          })
+          .toArray();
+        res.json(proposals);
+      },
+    );
+    app.get(
+      "/api/client/proposals/:email",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        try {
+          const { email } = req.params;
+          const proposals = await taskCollection
+            .aggregate([
+              {
+                $match: {
+                  clientEmail: email,
+                },
+              },
 
-        // মোট উপার্জিত টাকার পরিমাণ হিসাব করা (Total Earnings Card এর জন্য)
-        const totalStats = await paymentCollection
+              {
+                $lookup: {
+                  from: "proposals",
+                  let: {
+                    taskId: { $toString: "$_id" },
+                  },
+                  pipeline: [
+                    {
+                      $match: {
+                        $expr: {
+                          $eq: ["$taskId", "$$taskId"],
+                        },
+                      },
+                    },
+                    {
+                      $match: {
+                        status: {
+                          $ne: "rejected",
+                        },
+                      },
+                    },
+                    {
+                      $sort: {
+                        submittedAt: -1,
+                      },
+                    },
+                  ],
+                  as: "proposals",
+                },
+              },
+
+              {
+                $unwind: "$proposals",
+              },
+
+              {
+                $replaceRoot: {
+                  newRoot: {
+                    $mergeObjects: [
+                      "$proposals",
+                      {
+                        taskTitle: "$title",
+                        category: "$category",
+                        budget: "$budget",
+                        deadline: "$deadline",
+                        taskStatus: "$status",
+                        clientEmail: "$clientEmail",
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                $sort: {
+                  submittedAt: -1,
+                },
+              },
+            ])
+            .toArray();
+
+          res.json(proposals);
+        } catch (err) {
+          console.error(err);
+          res.status(500).json({
+            message: "Internal Server Error",
+          });
+        }
+      },
+    );
+    app.get(
+      "/api/active/projects",
+      verifyToken,
+      verifyFreelancer,
+      async (req, res) => {
+        const freelancerEmail = req.query.freelancerEmail;
+        const result = await proposalCollection
           .aggregate([
             {
               $match: {
                 freelancerEmail: freelancerEmail,
-                payment_status: "paid",
               },
             },
             {
-              $group: {
-                _id: null,
-                total: { $sum: { $toDouble: "$amount" } },
+              $addFields: {
+                taskObjId: {
+                  $toObjectId: "$taskId",
+                },
+              },
+            },
+            {
+              $lookup: {
+                from: "tasks",
+                localField: "taskObjId",
+                foreignField: "_id",
+                as: "tasks",
+              },
+            },
+            {
+              $unwind: "$tasks",
+            },
+            {
+              $match: {
+                "tasks.status": { $ne: "open" },
               },
             },
           ])
           .toArray();
+        res.json(result);
+      },
+    );
 
-        const totalMade = totalStats.length > 0 ? totalStats[0].total : 0;
+    // Payment Related Api
+    app.post(
+      "/api/save/payment",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        const data = req.body;
+        const paymentData = {
+          ...data,
+          payedAt: new Date(),
+        };
+        const result = await paymentCollection.insertOne(paymentData);
 
-        res.json({
-          success: true,
-          totalEarnings: totalMade,
-          data: earningsBreakdown,
-        });
-      } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-      }
-    });
-    app.get("/api/payments", async (req, res) => {
+        //update payed proposal, pending to accepted
+        await proposalCollection.updateOne(
+          {
+            _id: new ObjectId(data?.proposalId),
+          },
+          {
+            $set: {
+              status: "accepted",
+            },
+          },
+        );
+        // Rejected others proposal
+        await proposalCollection.updateMany(
+          {
+            taskId: data?.taskId,
+            _id: { $ne: new ObjectId(data?.proposalId) },
+          },
+          {
+            $set: {
+              status: "rejected",
+            },
+          },
+        );
+        // update task status to in-progress
+        await taskCollection.updateOne(
+          {
+            _id: new ObjectId(data?.taskId),
+          },
+          {
+            $set: {
+              status: "In-progress",
+            },
+          },
+        );
+        res.json(result);
+      },
+    );
+    app.get(
+      "/api/freelancer/earnings/:email",
+      verifyToken,
+      verifyFreelancer,
+      async (req, res) => {
+        try {
+          const freelancerEmail = req.params.email;
+          // Aggregation Pipeline to join payment, tasks, and users collections
+          const earningsBreakdown = await paymentCollection
+            .aggregate([
+              {
+                $match: {
+                  freelancerEmail: freelancerEmail,
+                  payment_status: "paid",
+                },
+              },
+              {
+                $addFields: { taskIdObj: { $toObjectId: "$taskId" } },
+              },
+              {
+                $lookup: {
+                  from: "tasks",
+                  localField: "taskIdObj",
+                  foreignField: "_id",
+                  as: "taskInfo",
+                },
+              },
+              {
+                $unwind: "$taskInfo",
+              },
+              {
+                $lookup: {
+                  from: "user",
+                  localField: "clientEmail",
+                  foreignField: "email",
+                  as: "clientInfo",
+                },
+              },
+              {
+                $unwind: "$clientInfo",
+              },
+              {
+                $project: {
+                  _id: 1,
+                  amount: 1,
+                  transaction_id: 1,
+                  payedAt: 1,
+                  taskTitle: {
+                    $ifNull: ["$taskInfo.title", "Deleted Project"],
+                  },
+                  clientName: {
+                    $ifNull: ["$clientInfo.name", "Unknown Client"],
+                  },
+                },
+              },
+              {
+                $sort: { payedAt: -1 },
+              },
+            ])
+            .toArray();
+
+          // মোট উপার্জিত টাকার পরিমাণ হিসাব করা (Total Earnings Card এর জন্য)
+          const totalStats = await paymentCollection
+            .aggregate([
+              {
+                $match: {
+                  freelancerEmail: freelancerEmail,
+                  payment_status: "paid",
+                },
+              },
+              {
+                $group: {
+                  _id: null,
+                  total: { $sum: { $toDouble: "$amount" } },
+                },
+              },
+            ])
+            .toArray();
+
+          const totalMade = totalStats.length > 0 ? totalStats[0].total : 0;
+
+          res.json({
+            success: true,
+            totalEarnings: totalMade,
+            data: earningsBreakdown,
+          });
+        } catch (error) {
+          res.status(500).json({ success: false, message: error.message });
+        }
+      },
+    );
+    app.get("/api/payments", verifyToken, verifyAdmin, async (req, res) => {
       const result = await paymentCollection.find().toArray();
       res.json(result);
     });
     // Review Related Api
-    app.post("/api/save/review", async (req, res) => {
+    app.post("/api/save/review", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const data = req.body;
         const reviewData = {
