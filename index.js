@@ -27,154 +27,205 @@ async function run() {
     const proposalCollection = db.collection("proposals");
     const paymentCollection = db.collection("payments");
     const reviewCollection = db.collection("reviews");
-
-    // stats api
-    app.get("/api/client-dashboard-stats", async (req, res) => {
-      const clientEmail = req.query.clientEmail;
-      const [taskStats, paymentStats] = await Promise.all([
-        taskCollection
-          .aggregate([
-            {
-              $match: { clientEmail },
-            },
-            {
-              $group: {
-                _id: null,
-                totalTasks: { $sum: 1 },
-
-                openTasks: {
-                  $sum: {
-                    $cond: [{ $eq: ["$status", "open"] }, 1, 0],
-                  },
-                },
-
-                inProgressTasks: {
-                  $sum: {
-                    $cond: [{ $eq: ["$status", "in-progress"] }, 1, 0],
-                  },
-                },
-              },
-            },
-          ])
-          .toArray(),
-
-        paymentCollection
-          .aggregate([
-            {
-              $match: {
-                clientEmail,
-                payment_status: "paid",
-              },
-            },
-            {
-              $group: {
-                _id: null,
-                totalSpent: {
-                  $sum: {
-                    $toDouble: "$amount",
-                  },
-                },
-              },
-            },
-          ])
-          .toArray(),
-      ]);
-      res.send({
-        totalTasks: taskStats[0]?.totalTasks || 0,
-        openTasks: taskStats[0]?.openTasks || 0,
-        inProgressTasks: taskStats[0]?.inProgressTasks || 0,
-        totalSpent: paymentStats[0]?.totalSpent || 0,
+    const sessionCollection = db.collection("session");
+    // Verification Related
+    const verifyToken = async (req, res, next) => {
+      const authHeaders = req.headers?.authorization;
+      const token = authHeaders.split(" ")[1];
+      if (!authHeaders) {
+        res.status(401).send({ message: "Unauthorized access" });
+      }
+      if (!token) {
+        res.status(401).send({ message: "Unauthorized access" });
+      }
+      const session = await sessionCollection.findOne({
+        token: token,
       });
-    });
-    app.get("/api/monthly-growth/:clientId", async (req, res) => {
-      const { clientId } = req.params;
-      const now = new Date();
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      const result = await taskCollection
-        .aggregate([
-          {
-            $match: {
-              clientId,
-              status: "completed",
-              createdAt: {
-                $gte: firstDay,
-                $lt: lastDay,
+      const userId = session?.userId;
+      const user = await userCollection.findOne({ _id: userId });
+      req.user = user;
+      console.log("user",user)
+      next();
+    };
+    const verifyClient = async (req, res, next) => {
+      const user = req.user;
+      if (!user.role === "Client") {
+        return res.status(403).send({ message: "Forbidden user" });
+      }
+      next();
+    };
+    const verifyFreelancer = async (req, res, next) => {
+      const user = req.user;
+      if (user.role !== "Freelancer") {
+        return res.status(403).send({ message: "Forbidden user" });
+      }
+      next();
+    };
+    // stats api
+    app.get(
+      "/api/client-dashboard-stats",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        const clientEmail = req.query.clientEmail;
+        const [taskStats, paymentStats] = await Promise.all([
+          taskCollection
+            .aggregate([
+              {
+                $match: { clientEmail },
               },
-            },
-          },
+              {
+                $group: {
+                  _id: null,
+                  totalTasks: { $sum: 1 },
 
-          {
-            $lookup: {
-              from: "payments",
-              let: {
-                taskId: { $toString: "$_id" },
-              },
-              pipeline: [
-                {
-                  $match: {
-                    $expr: {
-                      $eq: ["$taskId", "$$taskId"],
+                  openTasks: {
+                    $sum: {
+                      $cond: [{ $eq: ["$status", "open"] }, 1, 0],
+                    },
+                  },
+
+                  inProgressTasks: {
+                    $sum: {
+                      $cond: [{ $eq: ["$status", "in-progress"] }, 1, 0],
                     },
                   },
                 },
-              ],
-              as: "payment",
-            },
-          },
-
-          {
-            $unwind: "$payment",
-          },
-
-          {
-            $group: {
-              _id: "$category",
-
-              completedTasks: {
-                $sum: 1,
               },
+            ])
+            .toArray(),
 
-              totalBudget: {
-                $sum: {
-                  $toDouble: "$payment.amount",
+          paymentCollection
+            .aggregate([
+              {
+                $match: {
+                  clientEmail,
+                  payment_status: "paid",
+                },
+              },
+              {
+                $group: {
+                  _id: null,
+                  totalSpent: {
+                    $sum: {
+                      $toDouble: "$amount",
+                    },
+                  },
+                },
+              },
+            ])
+            .toArray(),
+        ]);
+        res.send({
+          totalTasks: taskStats[0]?.totalTasks || 0,
+          openTasks: taskStats[0]?.openTasks || 0,
+          inProgressTasks: taskStats[0]?.inProgressTasks || 0,
+          totalSpent: paymentStats[0]?.totalSpent || 0,
+        });
+      },
+    );
+    app.get(
+      "/api/monthly-growth/:clientId",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        const { clientId } = req.params;
+        const now = new Date();
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const result = await taskCollection
+          .aggregate([
+            {
+              $match: {
+                clientId,
+                status: "completed",
+                createdAt: {
+                  $gte: firstDay,
+                  $lt: lastDay,
                 },
               },
             },
-          },
 
-          {
-            $project: {
-              _id: 0,
-              category: "$_id",
-              completedTasks: 1,
-              totalBudget: 1,
+            {
+              $lookup: {
+                from: "payments",
+                let: {
+                  taskId: { $toString: "$_id" },
+                },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $eq: ["$taskId", "$$taskId"],
+                      },
+                    },
+                  },
+                ],
+                as: "payment",
+              },
             },
-          },
 
-          {
-            $sort: {
-              totalBudget: -1,
+            {
+              $unwind: "$payment",
             },
-          },
-        ])
-        .toArray();
-      res.json(result);
-    });
-    app.get("/api/freelancer-overview/:email", async (req, res) => {
-      try {
-        const { email } = req.params;
 
-        const now = new Date();
+            {
+              $group: {
+                _id: "$category",
 
-        const firstDayOfThreeMonthsAgo = new Date(
-          now.getFullYear(),
-          now.getMonth() - 2,
-          1,
-        );
+                completedTasks: {
+                  $sum: 1,
+                },
 
-        const [proposalStats, paymentStats, runningProjects, monthlyEarnings] =
-          await Promise.all([
+                totalBudget: {
+                  $sum: {
+                    $toDouble: "$payment.amount",
+                  },
+                },
+              },
+            },
+
+            {
+              $project: {
+                _id: 0,
+                category: "$_id",
+                completedTasks: 1,
+                totalBudget: 1,
+              },
+            },
+
+            {
+              $sort: {
+                totalBudget: -1,
+              },
+            },
+          ])
+          .toArray();
+        res.json(result);
+      },
+    );
+    app.get(
+      "/api/freelancer-overview/:email",
+      verifyToken,
+      verifyFreelancer,
+      async (req, res) => {
+        try {
+          const { email } = req.params;
+
+          const now = new Date();
+
+          const firstDayOfThreeMonthsAgo = new Date(
+            now.getFullYear(),
+            now.getMonth() - 2,
+            1,
+          );
+
+          const [
+            proposalStats,
+            paymentStats,
+            runningProjects,
+            monthlyEarnings,
+          ] = await Promise.all([
             // Proposal Statistics
             proposalCollection
               .aggregate([
@@ -344,25 +395,26 @@ async function run() {
               .toArray(),
           ]);
 
-        const stats = {
-          totalProposals: proposalStats[0]?.totalProposals || 0,
-          pendingProposals: proposalStats[0]?.pendingProposals || 0,
-          acceptedProposals: proposalStats[0]?.acceptedProposals || 0,
-          totalEarnings: paymentStats[0]?.totalEarnings || 0,
-        };
+          const stats = {
+            totalProposals: proposalStats[0]?.totalProposals || 0,
+            pendingProposals: proposalStats[0]?.pendingProposals || 0,
+            acceptedProposals: proposalStats[0]?.acceptedProposals || 0,
+            totalEarnings: paymentStats[0]?.totalEarnings || 0,
+          };
 
-        res.send({
-          stats,
-          runningProjects,
-          monthlyEarnings,
-        });
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({
-          message: "Internal Server Error",
-        });
-      }
-    });
+          res.send({
+            stats,
+            runningProjects,
+            monthlyEarnings,
+          });
+        } catch (error) {
+          console.error(error);
+          res.status(500).send({
+            message: "Internal Server Error",
+          });
+        }
+      },
+    );
     app.get("/api/admin/overview", async (req, res) => {
       try {
         const today = new Date();
@@ -532,16 +584,28 @@ async function run() {
       }
     });
     // User Related Api
-    app.get("/api/user/:id", async (req, res) => {
+    app.get("/api/user/:id", verifyToken, async (req, res) => {
       const userId = req.params.id;
+      const id = req.user._id.toString();
+      if (id !== userId) {
+        return res.status(403).json({
+          message: "Forbidden",
+        });
+      }
       const result = await userCollection.findOne({
         _id: new ObjectId(userId),
       });
       res.json(result);
     });
-    app.patch("/api/update/user/:id", async (req, res) => {
+    app.patch("/api/update/user/:id", verifyToken, async (req, res) => {
       const userId = req.params.id;
       const updatedUserData = req.body;
+      const id = req.user?._id.toString();
+      if (id !== userId) {
+        return res.status(403).json({
+          message: "Forbidden",
+        });
+      }
       const result = await userCollection.updateOne(
         {
           _id: new ObjectId(userId),
@@ -572,16 +636,21 @@ async function run() {
       res.json(result);
     });
     // Tasks Related Api
-    app.post("/api/create/task", async (req, res) => {
-      const data = req.body;
-      const taskData = {
-        ...data,
-        createdAt: new Date(),
-      };
-      const result = await taskCollection.insertOne(taskData);
-      res.json(result);
-    });
-    app.patch("/api/update/task/:id", async (req, res) => {
+    app.post(
+      "/api/create/task",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        const data = req.body;
+        const taskData = {
+          ...data,
+          createdAt: new Date(),
+        };
+        const result = await taskCollection.insertOne(taskData);
+        res.json(result);
+      },
+    );
+    app.patch("/api/update/task/:id",verifyToken,verifyClient, async (req, res) => {
       const taskId = req.params.id;
       const updatedFields = req.body;
       const result = await taskCollection.updateOne(
@@ -590,7 +659,7 @@ async function run() {
       );
       res.json(result);
     });
-    app.delete("/api/delete/task/:id", async (req, res) => {
+    app.delete("/api/delete/task/:id",verifyToken,verifyClient, async (req, res) => {
       const taskId = req.params.id;
       const result = await taskCollection.deleteOne({
         _id: new ObjectId(taskId),
@@ -684,8 +753,8 @@ async function run() {
             },
           },
           {
-            $sort:{createdAt:-1}
-          }
+            $sort: { createdAt: -1 },
+          },
         ])
         .toArray();
       res.json({ allTasks });
@@ -795,16 +864,22 @@ async function run() {
         });
       }
     });
-    app.get("/api/featured/tasks",async(req,res)=>{
-      const result=await taskCollection.aggregate([
-        {$match:{
-          status:"open"
-        }},{
-          $sort:{createdAt:-1}
-        }
-      ]).limit(6).toArray()
-      res.json(result)
-    })
+    app.get("/api/featured/tasks", async (req, res) => {
+      const result = await taskCollection
+        .aggregate([
+          {
+            $match: {
+              status: "open",
+            },
+          },
+          {
+            $sort: { createdAt: -1 },
+          },
+        ])
+        .limit(6)
+        .toArray();
+      res.json(result);
+    });
     app.get("/api/taskDetails/:id", async (req, res) => {
       const { id } = req.params;
       const task = await taskCollection
@@ -896,7 +971,7 @@ async function run() {
     });
 
     // Proposal Related Api
-    app.post("/api/post/proposal", async (req, res) => {
+    app.post("/api/post/proposal",verifyToken,verifyFreelancer, async (req, res) => {
       const data = req.body;
       const proposalData = {
         ...data,
@@ -905,7 +980,7 @@ async function run() {
       const result = await proposalCollection.insertOne(proposalData);
       res.json(result);
     });
-    app.patch("/api/update/proposal", async (req, res) => {
+    app.patch("/api/update/proposal",verifyToken, async (req, res) => {
       const { status } = req.body;
       const proposalId = req.query.proposalId;
       const result = await proposalCollection.updateOne(
@@ -920,7 +995,7 @@ async function run() {
       );
       res.json(result);
     });
-    app.delete("/api/delete/proposal/:id", async (req, res) => {
+    app.delete("/api/delete/proposal/:id", verifyToken,verifyFreelancer, async (req, res) => {
       const proposalId = req.params.id;
       const result = await proposalCollection.deleteOne({
         _id: new ObjectId(proposalId),
@@ -928,7 +1003,7 @@ async function run() {
       console.log("result", result);
       res.json(result);
     });
-    app.get("/api/proposal", async (req, res) => {
+    app.get("/api/proposal",verifyToken,verifyFreelancer, async (req, res) => {
       const query = {};
       if (req.query.taskId && req.query.freelancerEmail) {
         query.taskId = req.query.taskId;
@@ -939,7 +1014,7 @@ async function run() {
             { freelancerEmail: query.freelancerEmail },
           ],
         });
-        res.json(proposal);
+        return res.json(proposal);
       }
       const proposal = await proposalCollection.find().toArray();
       res.json(proposal);
@@ -978,7 +1053,7 @@ async function run() {
         .toArray();
       res.json(proposal[0]);
     });
-    app.get("/api/freelancer/proposals", async (req, res) => {
+    app.get("/api/freelancer/proposals",verifyToken,verifyFreelancer, async (req, res) => {
       const freelancerEmail = req.query.freelancerEmail;
       const proposals = await proposalCollection
         .find({
@@ -987,47 +1062,52 @@ async function run() {
         .toArray();
       res.json(proposals);
     });
-    app.get("/api/client/proposals", async (req, res) => {
-      const proposals = await proposalCollection
-        .aggregate([
-          {
-            $lookup: {
-              from: "tasks",
-              let: {
-                taskId: "$_id",
-              },
-              pipeline: [
-                {
-                  $match: {
-                    $expr: {
-                      $eq: [{ $toObjectId: "$taskId" }, "$$taskId"],
+    app.get(
+      "/api/client/proposals",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        const proposals = await proposalCollection
+          .aggregate([
+            {
+              $lookup: {
+                from: "tasks",
+                let: {
+                  taskId: "$_id",
+                },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $eq: [{ $toObjectId: "$taskId" }, "$$taskId"],
+                      },
                     },
                   },
-                },
-              ],
-              as: "tasks",
+                ],
+                as: "tasks",
+              },
             },
-          },
-          {
-            $project: {
-              tasks: 0,
+            {
+              $project: {
+                tasks: 0,
+              },
             },
-          },
-          {
-            $match: {
-              status: { $ne: "rejected" },
+            {
+              $match: {
+                status: { $ne: "rejected" },
+              },
             },
-          },
-          {
-            $sort: {
-              submittedAt: -1,
+            {
+              $sort: {
+                submittedAt: -1,
+              },
             },
-          },
-        ])
-        .toArray();
-      res.json(proposals);
-    });
-    app.get("/api/active/projects", async (req, res) => {
+          ])
+          .toArray();
+        res.json(proposals);
+      },
+    );
+    app.get("/api/active/projects",verifyToken,verifyFreelancer, async (req, res) => {
       const freelancerEmail = req.query.freelancerEmail;
       const result = await proposalCollection
         .aggregate([
@@ -1109,7 +1189,7 @@ async function run() {
       );
       res.json(result);
     });
-    app.get("/api/freelancer/earnings/:email", async (req, res) => {
+    app.get("/api/freelancer/earnings/:email", verifyToken,verifyFreelancer, async (req, res) => {
       try {
         const freelancerEmail = req.params.email;
         // Aggregation Pipeline to join payment, tasks, and users collections
