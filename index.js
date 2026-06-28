@@ -20,7 +20,8 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
+
     const db = await client.db("TaskForgeDB");
     const taskCollection = db.collection("tasks");
     const userCollection = db.collection("user");
@@ -44,7 +45,6 @@ async function run() {
       const userId = session?.userId;
       const user = await userCollection.findOne({ _id: userId });
       req.user = user;
-      // console.log("user", user);
       next();
     };
     const verifyClient = async (req, res, next) => {
@@ -422,174 +422,179 @@ async function run() {
         }
       },
     );
-    app.get("/api/admin/overview", verifyToken,verifyAdmin, async (req, res) => {
-      try {
-        const today = new Date();
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(today.getDate() - 6);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
-        const [
-          totalUsers,
-          totalTasks,
-          activeTasks,
-          revenue,
-          categoryData,
-          paymentTrend,
-          userTrend,
-        ] = await Promise.all([
-          // Total Users
-          userCollection.countDocuments(),
-
-          // Total Tasks
-          taskCollection.countDocuments(),
-
-          // Active Tasks
-          taskCollection.countDocuments({
-            status: { $ne: "completed" },
-          }),
-
-          // Total Revenue
-          paymentCollection
-            .aggregate([
-              {
-                $match: {
-                  payment_status: "paid",
-                },
-              },
-              {
-                $group: {
-                  _id: null,
-                  totalRevenue: {
-                    $sum: {
-                      $toDouble: "$amount",
-                    },
-                  },
-                },
-              },
-            ])
-            .toArray(),
-
-          // Category Distribution
-          taskCollection
-            .aggregate([
-              {
-                $group: {
-                  _id: "$category",
-                  value: {
-                    $sum: 1,
-                  },
-                },
-              },
-              {
-                $project: {
-                  _id: 0,
-                  name: "$_id",
-                  value: 1,
-                },
-              },
-            ])
-            .toArray(),
-
-          // Last 7 Days Revenue
-          paymentCollection
-            .aggregate([
-              {
-                $match: {
-                  payment_status: "paid",
-                  payedAt: {
-                    $gte: sevenDaysAgo,
-                  },
-                },
-              },
-              {
-                $group: {
-                  _id: {
-                    $dateToString: {
-                      format: "%Y-%m-%d",
-                      date: "$payedAt",
-                    },
-                  },
-
-                  revenue: {
-                    $sum: {
-                      $toDouble: "$amount",
-                    },
-                  },
-                },
-              },
-            ])
-            .toArray(),
-
-          // Last 7 Days Registration
-          userCollection
-            .aggregate([
-              {
-                $match: {
-                  createdAt: {
-                    $gte: sevenDaysAgo,
-                  },
-                },
-              },
-              {
-                $group: {
-                  _id: {
-                    $dateToString: {
-                      format: "%Y-%m-%d",
-                      date: "$createdAt",
-                    },
-                  },
-
-                  users: {
-                    $sum: 1,
-                  },
-                },
-              },
-            ])
-            .toArray(),
-        ]);
-
-        // ===========================
-        // Merge Trend Data
-        // ===========================
-
-        const trendData = [];
-
-        for (let i = 6; i >= 0; i--) {
-          const date = new Date();
-
-          date.setDate(today.getDate() - i);
-
-          const key = date.toISOString().split("T")[0];
-
-          trendData.push({
-            date: key,
-            revenue:
-              paymentTrend.find((item) => item._id === key)?.revenue || 0,
-
-            users: userTrend.find((item) => item._id === key)?.users || 0,
-          });
-        }
-
-        res.json({
-          stats: {
+    app.get(
+      "/api/admin/overview",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const today = new Date();
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(today.getDate() - 6);
+          sevenDaysAgo.setHours(0, 0, 0, 0);
+          const [
             totalUsers,
             totalTasks,
             activeTasks,
-            totalRevenue: revenue[0]?.totalRevenue || 0,
-          },
+            revenue,
+            categoryData,
+            paymentTrend,
+            userTrend,
+          ] = await Promise.all([
+            // Total Users
+            userCollection.countDocuments(),
 
-          categoryData,
+            // Total Tasks
+            taskCollection.countDocuments(),
 
-          trendData,
-        });
-      } catch (error) {
-        console.log(error);
+            // Active Tasks
+            taskCollection.countDocuments({
+              status: { $ne: "completed" },
+            }),
 
-        res.status(500).send({
-          message: "Internal Server Error",
-        });
-      }
-    });
+            // Total Revenue
+            paymentCollection
+              .aggregate([
+                {
+                  $match: {
+                    payment_status: "paid",
+                  },
+                },
+                {
+                  $group: {
+                    _id: null,
+                    totalRevenue: {
+                      $sum: {
+                        $toDouble: "$amount",
+                      },
+                    },
+                  },
+                },
+              ])
+              .toArray(),
+
+            // Category Distribution
+            taskCollection
+              .aggregate([
+                {
+                  $group: {
+                    _id: "$category",
+                    value: {
+                      $sum: 1,
+                    },
+                  },
+                },
+                {
+                  $project: {
+                    _id: 0,
+                    name: "$_id",
+                    value: 1,
+                  },
+                },
+              ])
+              .toArray(),
+
+            // Last 7 Days Revenue
+            paymentCollection
+              .aggregate([
+                {
+                  $match: {
+                    payment_status: "paid",
+                    payedAt: {
+                      $gte: sevenDaysAgo,
+                    },
+                  },
+                },
+                {
+                  $group: {
+                    _id: {
+                      $dateToString: {
+                        format: "%Y-%m-%d",
+                        date: "$payedAt",
+                      },
+                    },
+
+                    revenue: {
+                      $sum: {
+                        $toDouble: "$amount",
+                      },
+                    },
+                  },
+                },
+              ])
+              .toArray(),
+
+            // Last 7 Days Registration
+            userCollection
+              .aggregate([
+                {
+                  $match: {
+                    createdAt: {
+                      $gte: sevenDaysAgo,
+                    },
+                  },
+                },
+                {
+                  $group: {
+                    _id: {
+                      $dateToString: {
+                        format: "%Y-%m-%d",
+                        date: "$createdAt",
+                      },
+                    },
+
+                    users: {
+                      $sum: 1,
+                    },
+                  },
+                },
+              ])
+              .toArray(),
+          ]);
+
+          // ===========================
+          // Merge Trend Data
+          // ===========================
+
+          const trendData = [];
+
+          for (let i = 6; i >= 0; i--) {
+            const date = new Date();
+
+            date.setDate(today.getDate() - i);
+
+            const key = date.toISOString().split("T")[0];
+
+            trendData.push({
+              date: key,
+              revenue:
+                paymentTrend.find((item) => item._id === key)?.revenue || 0,
+
+              users: userTrend.find((item) => item._id === key)?.users || 0,
+            });
+          }
+
+          res.json({
+            stats: {
+              totalUsers,
+              totalTasks,
+              activeTasks,
+              totalRevenue: revenue[0]?.totalRevenue || 0,
+            },
+
+            categoryData,
+
+            trendData,
+          });
+        } catch (error) {
+          console.log(error);
+
+          res.status(500).send({
+            message: "Internal Server Error",
+          });
+        }
+      },
+    );
     // User Related Api
     app.get("/api/user/:id", async (req, res) => {
       const userId = req.params.id;
@@ -665,18 +670,14 @@ async function run() {
         res.json(result);
       },
     );
-    app.delete(
-      "/api/delete/task/:id",
-      verifyToken,
-      async (req, res) => {
-        const taskId = req.params.id;
-        const result = await taskCollection.deleteOne({
-          _id: new ObjectId(taskId),
-        });
-        res.json(result);
-      },
-    );
-    app.get("/api/tasks",verifyToken, async (req, res) => {
+    app.delete("/api/delete/task/:id", verifyToken, async (req, res) => {
+      const taskId = req.params.id;
+      const result = await taskCollection.deleteOne({
+        _id: new ObjectId(taskId),
+      });
+      res.json(result);
+    });
+    app.get("/api/tasks", verifyToken, async (req, res) => {
       const query = {};
       if (req.query.clientId) {
         // for specific client task
@@ -771,12 +772,12 @@ async function run() {
     });
     app.get("/api/browse-tasks", async (req, res) => {
       try {
-        const { search, category, budget,page } = req.query;
-        const currentPage=parseInt(page)||1;
-        const limit=4
-        const skipItem=(currentPage-1)*limit;
-        const totalTasks=await taskCollection.countDocuments();
-        const totalPages=Math.ceil(totalTasks/limit);
+        const { search, category, budget, page } = req.query;
+        const currentPage = parseInt(page) || 1;
+        const limit = 10;
+        const skipItem = (currentPage - 1) * limit;
+        const totalTasks = await taskCollection.countDocuments();
+        const totalPages = Math.ceil(totalTasks / limit);
         const match = {
           status: "open",
         };
@@ -868,9 +869,11 @@ async function run() {
               },
             },
           ])
-          .skip(skipItem).limit(limit).toArray();
+          .skip(skipItem)
+          .limit(limit)
+          .toArray();
 
-        res.send({tasks,currentPage,totalTasks,totalPages});
+        res.send({ tasks, currentPage, totalTasks, totalPages });
       } catch (err) {
         console.log(err);
         res.status(500).send({
@@ -1027,7 +1030,8 @@ async function run() {
         res.json(result);
       },
     );
-    app.get("/api/proposal", async (req, res) => { //use for checking already applied, used in browse-task page
+    app.get("/api/proposal", async (req, res) => {
+      //use for checking already applied, used in browse-task page
       const query = {};
       if (req.query.taskId && req.query.freelancerEmail) {
         query.taskId = req.query.taskId;
@@ -1367,53 +1371,59 @@ async function run() {
       res.json(result);
     });
     // Review Related Api
-    app.post("/api/save/review", verifyToken, verifyClient, async (req, res) => {
-      try {
-        const data = req.body;
-        const reviewData = {
-          ...data,
-          reviewedAt: new Date(),
-        };
-        const result = await reviewCollection.insertOne(reviewData);
-        const freelancerEmail = data.reviewee_email;
-        const freelancer = await userCollection.findOne({
-          email: freelancerEmail,
-        });
+    app.post(
+      "/api/save/review",
+      verifyToken,
+      verifyClient,
+      async (req, res) => {
+        try {
+          const data = req.body;
+          const reviewData = {
+            ...data,
+            reviewedAt: new Date(),
+          };
+          const result = await reviewCollection.insertOne(reviewData);
+          const freelancerEmail = data.reviewee_email;
+          const freelancer = await userCollection.findOne({
+            email: freelancerEmail,
+          });
 
-        if (freelancer) {
-          const currentTotalReviews = freelancer?.totalReviews || 0;
-          const currentAverageRating = freelancer?.averageRating || 0;
+          if (freelancer) {
+            const currentTotalReviews = freelancer?.totalReviews || 0;
+            const currentAverageRating = freelancer?.averageRating || 0;
 
-          const newTotalReviews = currentTotalReviews + 1;
+            const newTotalReviews = currentTotalReviews + 1;
 
-          const calculatedAverage =
-            (currentAverageRating * currentTotalReviews + Number(data.rating)) /
-            newTotalReviews;
-          const newAverageRating = parseFloat(calculatedAverage.toFixed(1));
-          await userCollection.updateOne(
-            { email: freelancerEmail },
-            {
-              $set: {
-                averageRating: newAverageRating,
-                totalReviews: newTotalReviews,
+            const calculatedAverage =
+              (currentAverageRating * currentTotalReviews +
+                Number(data.rating)) /
+              newTotalReviews;
+            const newAverageRating = parseFloat(calculatedAverage.toFixed(1));
+            await userCollection.updateOne(
+              { email: freelancerEmail },
+              {
+                $set: {
+                  averageRating: newAverageRating,
+                  totalReviews: newTotalReviews,
+                },
               },
-            },
-          );
+            );
+          }
+          res.json(result);
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+            error: error.message,
+          });
         }
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({
-          success: false,
-          message: "Internal Server Error",
-          error: error.message,
-        });
-      }
-    });
+      },
+    );
     app.get("/reviews", async (req, res) => {
       const result = await reviewCollection.find().toArray();
       res.json(result);
     });
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
