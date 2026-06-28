@@ -771,8 +771,12 @@ async function run() {
     });
     app.get("/api/browse-tasks", async (req, res) => {
       try {
-        const { search, category, budget } = req.query;
-
+        const { search, category, budget,page } = req.query;
+        const currentPage=parseInt(page)||1;
+        const limit=4
+        const skipItem=(currentPage-1)*limit;
+        const totalTasks=await taskCollection.countDocuments();
+        const totalPages=Math.ceil(totalTasks/limit);
         const match = {
           status: "open",
         };
@@ -864,9 +868,9 @@ async function run() {
               },
             },
           ])
-          .toArray();
+          .skip(skipItem).limit(limit).toArray();
 
-        res.send(tasks);
+        res.send({tasks,currentPage,totalTasks,totalPages});
       } catch (err) {
         console.log(err);
         res.status(500).send({
