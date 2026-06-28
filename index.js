@@ -63,7 +63,7 @@ async function run() {
     };
     const verifyAdmin = async (req, res, next) => {
       const user = req.user;
-      if (user.role !== "Admin") {
+      if (user.role.toLowerCase() !== "admin") {
         return res.status(403).send({ message: "Forbidden user" });
       }
       next();
@@ -422,7 +422,7 @@ async function run() {
         }
       },
     );
-    app.get("/api/admin/overview", async (req, res) => {
+    app.get("/api/admin/overview", verifyToken,verifyAdmin, async (req, res) => {
       try {
         const today = new Date();
         const sevenDaysAgo = new Date();
@@ -591,14 +591,8 @@ async function run() {
       }
     });
     // User Related Api
-    app.get("/api/user/:id", verifyToken, async (req, res) => {
+    app.get("/api/user/:id", async (req, res) => {
       const userId = req.params.id;
-      const id = req.user._id.toString();
-      if (id !== userId) {
-        return res.status(403).json({
-          message: "Forbidden",
-        });
-      }
       const result = await userCollection.findOne({
         _id: new ObjectId(userId),
       });
@@ -674,7 +668,6 @@ async function run() {
     app.delete(
       "/api/delete/task/:id",
       verifyToken,
-      verifyClient,
       async (req, res) => {
         const taskId = req.params.id;
         const result = await taskCollection.deleteOne({
@@ -683,7 +676,7 @@ async function run() {
         res.json(result);
       },
     );
-    app.get("/api/tasks", async (req, res) => {
+    app.get("/api/tasks",verifyToken, async (req, res) => {
       const query = {};
       if (req.query.clientId) {
         // for specific client task
@@ -1030,7 +1023,7 @@ async function run() {
         res.json(result);
       },
     );
-    app.get("/api/proposal", async (req, res) => {
+    app.get("/api/proposal", async (req, res) => { //use for checking already applied, used in browse-task page
       const query = {};
       if (req.query.taskId && req.query.freelancerEmail) {
         query.taskId = req.query.taskId;
@@ -1370,7 +1363,7 @@ async function run() {
       res.json(result);
     });
     // Review Related Api
-    app.post("/api/save/review", verifyToken, verifyAdmin, async (req, res) => {
+    app.post("/api/save/review", verifyToken, verifyClient, async (req, res) => {
       try {
         const data = req.body;
         const reviewData = {
