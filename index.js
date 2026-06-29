@@ -622,6 +622,19 @@ async function run() {
       );
       res.json(result);
     });
+     app.patch("/api/block/user/:id", verifyToken,verifyAdmin, async (req, res) => {
+      const userId = req.params.id;
+      const updatedUserData = req.body;
+      const result = await userCollection.updateOne(
+        {
+          _id: new ObjectId(userId),
+        },
+        {
+          $set: updatedUserData,
+        },
+      );
+      res.json(result);
+    });
     app.get("/api/all/users", async (req, res) => {
       const result = await userCollection.find().toArray();
       res.json(result);
